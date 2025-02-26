@@ -7,6 +7,7 @@ use expanduser::expanduser;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use terminal_size::{terminal_size, Width};
 use timediff::TimeDiff;
 use unicode_segmentation::UnicodeSegmentation;
 #[derive(Parser, Debug)]
@@ -129,11 +130,28 @@ fn get_path_mtime(entry: std::result::Result<fs::DirEntry, std::io::Error>) -> R
 }
 
 fn print_file_info(file_info: Vec<File>) -> Result<()> {
-    let max_filename_length = 80;
     let is_tty = atty::is(Stream::Stdout);
 
-    let modified_time_width = 20;
-    let relative_time_width = 15;
+    // Get terminal width or use default if not available
+    let term_width = if let Some((Width(w), _)) = terminal_size() {
+        w as usize
+    } else {
+        80 // default width
+    };
+
+    // Calculate column widths based on terminal width
+    // Use approximately these proportions: 50% filename, 30% modified time, 20% relative time
+    let total_spacing = 4; // 2 spaces between each column
+    let available_width = term_width.saturating_sub(total_spacing);
+
+    let name_width = (available_width * 5) / 10;
+    let modified_time_width = (available_width * 3) / 10;
+    let relative_time_width = available_width - name_width - modified_time_width;
+
+    // Ensure minimum widths
+    let name_width = name_width.max(20);
+    let modified_time_width = modified_time_width.max(15);
+    let relative_time_width = relative_time_width.max(10);
 
     // Show table headers
     if is_tty {
@@ -142,7 +160,7 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
             "Name",
             "Modified Time",
             "Relative Time",
-            name_width = max_filename_length,
+            name_width = name_width,
             modified_time_width = modified_time_width,
             relative_time_width = relative_time_width
         );
@@ -152,7 +170,7 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
             "Name",
             "Modified Time",
             "Relative Time",
-            name_width = max_filename_length,
+            name_width = name_width,
             modified_time_width = modified_time_width,
             relative_time_width = relative_time_width
         );
@@ -160,36 +178,39 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
 
     for file in file_info {
         let hr_time = human_readable_system_time(file.modified_time);
-        let filename_abbreviated = abbreviate_filename(&file.name, max_filename_length);
+        let filename_abbreviated = abbreviate_filename(&file.name, name_width);
 
         if file.file_type == FileType::Directory {
-            // Print directories in blue
             if is_tty {
                 println!(
-                    "\x1b[34m{:<max$}\x1b[0m  {}  {}",
+                    "\x1b[34m{:<width$}\x1b[0m  {:<modified_width$}  {:<relative_width$}",
                     filename_abbreviated,
                     hr_time,
                     file.relative_time,
-                    max = max_filename_length
+                    width = name_width,
+                    modified_width = modified_time_width,
+                    relative_width = relative_time_width
                 );
             } else {
-                // Print directories without color
                 println!(
-                    "{:<max$}  {}  {}",
+                    "{:<width$}  {:<modified_width$}  {:<relative_width$}",
                     filename_abbreviated,
                     hr_time,
                     file.relative_time,
-                    max = max_filename_length
+                    width = name_width,
+                    modified_width = modified_time_width,
+                    relative_width = relative_time_width
                 );
             }
         } else {
-            // Print files normally
             println!(
-                "{:<max$}  {}  {}",
+                "{:<width$}  {:<modified_width$}  {:<relative_width$}",
                 filename_abbreviated,
                 hr_time,
                 file.relative_time,
-                max = max_filename_length
+                width = name_width,
+                modified_width = modified_time_width,
+                relative_width = relative_time_width
             );
         }
     }
