@@ -18,7 +18,7 @@ jobs:
           override: true
 
       - name: Build
-        run: cargo build --all --release && strip target/release/recent && mv target/release/PROJECT_NAME target/release/PROJECT_NAME_amd64
+        run: cargo build --all --release && strip target/release/recent && mv target/release/recent target/release/recenet_amd64
 
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -70,7 +70,7 @@ jobs:
           override: true
 
       - name: Build for mac
-        run: cargo build --all --release && strip target/release/recent && mv target/release/PROJECT_NAME target/release/PROJECT_NAME_darwin
+        run: cargo build --all --release && strip target/release/recent && mv target/release/recent target/release/recent_darwin
 
       - name: Release
         uses: softprops/action-gh-release@v1
