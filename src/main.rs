@@ -75,10 +75,10 @@ fn abbreviate_filename(filename: &str, max_length: usize) -> String {
 fn list_dir(path: &Path, num_files: &usize) -> Result<()> {
     let path_str = path.to_str().expect("Unable to convert path to string");
     let path = expanduser(path_str)?;
-    let entries = path.read_dir().expect("Failed to read directory");
-
+    let raw_entries = path.read_dir().expect("Failed to read directory");
+    let entries = raw_entries.filter_map(|entry| entry.ok());
     let mut file_info: Vec<File> = entries
-        .map(|entry| get_path_mtime(entry).unwrap())
+        .filter_map(|entry| get_path_mtime(entry).ok())
         .collect();
 
     // Sort by modified time
@@ -86,10 +86,7 @@ fn list_dir(path: &Path, num_files: &usize) -> Result<()> {
     file_info.reverse();
 
     // Remove symlinks and hidden files
-    file_info = file_info
-        .into_iter()
-        .filter(|f| f.file_type != FileType::Symlink && f.file_type != FileType::Hidden)
-        .collect();
+    file_info.retain(|f| f.file_type != FileType::Symlink && f.file_type != FileType::Hidden);
 
     // Slice by num_files
     file_info.truncate(*num_files);
@@ -98,11 +95,11 @@ fn list_dir(path: &Path, num_files: &usize) -> Result<()> {
     Ok(())
 }
 
-fn get_path_mtime(entry: std::result::Result<fs::DirEntry, std::io::Error>) -> Result<File> {
-    let entry = entry.expect("Failed to read entry");
+fn get_path_mtime(entry: fs::DirEntry) -> Result<File> {
     let path = entry.path();
-    let metadata = fs::metadata(&path).expect("Unable to read metadata");
-
+    let metadata = fs::metadata(&path);
+    // we we can't get metadata, return an Error
+    let metadata = metadata.context("Unable to get metadata")?;
     let file_type =
         if metadata.is_file() && !path.file_name().unwrap().to_string_lossy().starts_with(".") {
             FileType::File
@@ -220,7 +217,7 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
 fn main() -> Result<()> {
     let opts = Opts::parse();
 
-    if &opts.num_files > &20 {
+    if opts.num_files > 20 {
         // setup the pager
         let mut pager = pager::Pager::new();
         pager.setup();
