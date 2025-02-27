@@ -82,7 +82,7 @@ fn list_dir(path: &Path, num_files: &usize, show_hidden: bool) -> Result<()> {
     let raw_entries = path.read_dir().expect("Failed to read directory");
     let entries = raw_entries.filter_map(|entry| entry.ok());
     let mut file_info: Vec<File> = entries
-        .filter_map(|entry| get_path_mtime(entry).ok())
+        .filter_map(|entry| get_modified_time(entry).ok())
         .collect();
     // sort by modified time and truncate to the requested number of files
 
@@ -103,11 +103,11 @@ fn list_dir(path: &Path, num_files: &usize, show_hidden: bool) -> Result<()> {
         allowed_types.contains(&f.file_type) && (!f.name.starts_with('.') || show_hidden)
     });
     file_info.truncate(*num_files);
-    print_file_info(file_info)?;
+    print_file_table(file_info)?;
     Ok(())
 }
 
-fn get_path_mtime(entry: fs::DirEntry) -> Result<File> {
+fn get_modified_time(entry: fs::DirEntry) -> Result<File> {
     let path = entry.path();
     let metadata = fs::metadata(&path);
     // we we can't get metadata, return an Error
@@ -138,7 +138,7 @@ fn get_path_mtime(entry: fs::DirEntry) -> Result<File> {
     })
 }
 
-fn print_file_info(file_info: Vec<File>) -> Result<()> {
+fn print_file_table(file_info: Vec<File>) -> Result<()> {
     let is_tty = atty::is(Stream::Stdout);
 
     // Get terminal width or use default if not available

@@ -12,6 +12,10 @@ clio = { version = "0.3.5", features = ["clap-parse"] }
 expanduser = "1.2.2"
 pager = "0.16.1"
 terminal_size = "0.4.1"
-time = { version = "0.3.36", features = ["formatting", "local-offset", "macros"] }
+time = { version = "0.3.36", features = [
+    "formatting",
+    "local-offset",
+    "macros",
+] }
 timediff = "0.2.3"
 unicode-segmentation = "1.11.0"
