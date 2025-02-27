@@ -7,9 +7,13 @@ use expanduser::expanduser;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use terminal_size::{terminal_size, Width};
+use terminal_size::{terminal_size, Height, Width};
 use timediff::TimeDiff;
 use unicode_segmentation::UnicodeSegmentation;
+
+const DEFAULT_WIDTH: usize = 80;
+const DEFAULT_HEIGHT: u16 = 24;
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Opts {
@@ -21,6 +25,10 @@ struct Opts {
     /// Default: 10
     #[clap(short, long, default_value = "10")]
     num_files: usize,
+
+    /// Show hidden files
+    #[clap(short, long)]
+    show_hidden: bool,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -29,6 +37,7 @@ enum FileType {
     Directory,
     Symlink,
     Hidden,
+    Dotfile,
 }
 
 #[derive(Debug)]
@@ -45,18 +54,14 @@ fn get_relative_time(t: SystemTime) -> Result<String> {
     let duration = SystemTime::now()
         .duration_since(t)
         .context("Unable to get duration since")?;
-    // turn to negative duration str
+    // need to create a duration negative to now
     let duration = format!("-{}s", duration.as_secs());
-    // use locale
     Ok(TimeDiff::to_diff(duration).parse()?)
 }
 
 fn human_readable_system_time(t: SystemTime) -> String {
-    // Convert SystemTime to chrono DateTime
     let datetime: DateTime<Utc> = DateTime::<Utc>::from(t);
-    // Convert the UTC time to local time
     let local_time: DateTime<Local> = datetime.with_timezone(&Local);
-    // Format the time as "[hour]:[minute]:[second] [day]-[month repr:short]-[year]"
     local_time.format("%H:%M:%S %d-%b-%Y").to_string()
 }
 
@@ -71,38 +76,42 @@ fn abbreviate_filename(filename: &str, max_length: usize) -> String {
         filename.to_string()
     }
 }
-
-fn list_dir(path: &Path, num_files: &usize) -> Result<()> {
+fn list_dir(path: &Path, num_files: &usize, show_hidden: bool) -> Result<()> {
     let path_str = path.to_str().expect("Unable to convert path to string");
     let path = expanduser(path_str)?;
-    let entries = path.read_dir().expect("Failed to read directory");
-
+    let raw_entries = path.read_dir().expect("Failed to read directory");
+    let entries = raw_entries.filter_map(|entry| entry.ok());
     let mut file_info: Vec<File> = entries
-        .map(|entry| get_path_mtime(entry).unwrap())
+        .filter_map(|entry| get_path_mtime(entry).ok())
         .collect();
+    // sort by modified time and truncate to the requested number of files
 
-    // Sort by modified time
+    let allowed_types = if show_hidden {
+        vec![
+            FileType::File,
+            FileType::Directory,
+            FileType::Symlink,
+            FileType::Hidden,
+            FileType::Dotfile,
+        ]
+    } else {
+        vec![FileType::File, FileType::Directory]
+    };
     file_info.sort_by_key(|f| f.modified_time);
     file_info.reverse();
-
-    // Remove symlinks and hidden files
-    file_info = file_info
-        .into_iter()
-        .filter(|f| f.file_type != FileType::Symlink && f.file_type != FileType::Hidden)
-        .collect();
-
-    // Slice by num_files
+    file_info.retain(|f| {
+        allowed_types.contains(&f.file_type) && (!f.name.starts_with('.') || show_hidden)
+    });
     file_info.truncate(*num_files);
-
     print_file_info(file_info)?;
     Ok(())
 }
 
-fn get_path_mtime(entry: std::result::Result<fs::DirEntry, std::io::Error>) -> Result<File> {
-    let entry = entry.expect("Failed to read entry");
+fn get_path_mtime(entry: fs::DirEntry) -> Result<File> {
     let path = entry.path();
-    let metadata = fs::metadata(&path).expect("Unable to read metadata");
-
+    let metadata = fs::metadata(&path);
+    // we we can't get metadata, return an Error
+    let metadata = metadata.context("Unable to get metadata")?;
     let file_type =
         if metadata.is_file() && !path.file_name().unwrap().to_string_lossy().starts_with(".") {
             FileType::File
@@ -136,19 +145,16 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
     let term_width = if let Some((Width(w), _)) = terminal_size() {
         w as usize
     } else {
-        80 // default width
+        DEFAULT_WIDTH
     };
 
-    // Calculate column widths based on terminal width
-    // Use approximately these proportions: 50% filename, 30% modified time, 20% relative time
-    let total_spacing = 4; // 2 spaces between each column
+    let total_spacing = 4;
     let available_width = term_width.saturating_sub(total_spacing);
 
     let name_width = (available_width * 5) / 10;
     let modified_time_width = (available_width * 3) / 10;
     let relative_time_width = available_width - name_width - modified_time_width;
 
-    // Ensure minimum widths
     let name_width = name_width.max(20);
     let modified_time_width = modified_time_width.max(15);
     let relative_time_width = relative_time_width.max(10);
@@ -179,7 +185,6 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
     for file in file_info {
         let hr_time = human_readable_system_time(file.modified_time);
         let filename_abbreviated = abbreviate_filename(&file.name, name_width);
-
         if file.file_type == FileType::Directory {
             if is_tty {
                 println!(
@@ -219,14 +224,19 @@ fn print_file_info(file_info: Vec<File>) -> Result<()> {
 
 fn main() -> Result<()> {
     let opts = Opts::parse();
-
-    if &opts.num_files > &20 {
-        // setup the pager
+    let term_height = if let Some((_, Height(h))) = terminal_size() {
+        h
+    } else {
+        DEFAULT_HEIGHT
+    };
+    // use a pager if the number of files exceeds the terminal height
+    let display_height = opts.num_files - 1;
+    if display_height > term_height as usize {
         let mut pager = pager::Pager::new();
         pager.setup();
     }
 
-    let res = list_dir(&opts.directory, &opts.num_files);
+    let res = list_dir(&opts.directory, &opts.num_files, opts.show_hidden);
     match res {
         Ok(_) => Ok(()),
         Err(e) => {
